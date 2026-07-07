@@ -1,0 +1,51 @@
+{
+  "name": "baiduwp-share",
+  "author": "your-name",
+  "title": "百度网盘分享链接下载",
+  "description": "支持百度网盘分享链接解析和下载，需要配置 Cookie (BDUSS)",
+  "icon": "icon.png",
+  "version": "1.0.0",
+  "homepage": "",
+  "repository": {
+    "url": ""
+  },
+  "scripts": [
+    {
+      "event": "onResolve",
+      "match": {
+        "urls": [
+          "*://pan.baidu.com/s/*",
+          "*://pan.baidu.com/share/*"
+        ]
+      },
+      "entry": "dist/index.js"
+    },
+    {
+      "event": "onStart",
+      "match": {
+        "labels": [
+          "your-name@baiduwp-share"
+        ]
+      },
+      "entry": "dist/index.js"
+    },
+    {
+      "event": "onError",
+      "match": {
+        "labels": [
+          "your-name@baiduwp-share"
+        ]
+      },
+      "entry": "dist/index.js"
+    }
+  ],
+  "settings": [
+    {
+      "name": "bdcookie",
+      "title": "百度网盘 Cookie",
+      "description": "百度网盘网页版 Cookie 中的 BDUSS 值，用于解析分享链接和获取下载地址",
+      "type": "string",
+      "value": ""
+    }
+  ]
+}
