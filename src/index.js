@@ -39,22 +39,26 @@ gopeed.events.onResolve(async (ctx) => {
     ctx.res = {
       name,
       files: fileList.map((item) => ({
-        name: item.server_filename,
-        size: item.size,
+        name: item.filename || item.server_filename || '未知文件名',
+        size: item.size || 0,
         path: item.path
-          .replace(parentDir, '')
-          .split('/')
-          .slice(0, -1)
-          .join('/'),
+          ? item.path
+              .replace(parentDir, '')
+              .split('/')
+              .slice(0, -1)
+              .join('/')
+          : '',
         req: {
-          url: `http://placeholder.baidu.com/file/${item.fs_id}`,
+          url: item.dlink || `http://placeholder.baidu.com/file/${item.fs_id}`,
           extra: {
             header: {
               'User-Agent': 'pan.baidu.com',
+              Cookie: gopeed.settings.bdcookie,
             },
           },
           labels: {
             [gopeed.info.identity]: '1',
+            rawUrl: ctx.req.url,
             surl: surl,
             pwd: pwd,
             fid: item.fs_id,

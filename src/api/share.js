@@ -139,6 +139,16 @@ class ShareClient {
     }
     return result.data;
   }
+
+  async getFileListWithInfo() {
+    const files = await deepFileList(this._doGetList.bind(this), '');
+    for (const file of files) {
+      if (!file.filename && file.server_filename) {
+        file.filename = file.server_filename;
+      }
+    }
+    return files;
+  }
 }
 
 export default ShareClient;
