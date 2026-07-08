@@ -3,7 +3,7 @@
   "author": "zhjich123",
   "title": "百度网盘分享链接下载",
   "description": "支持百度网盘分享链接解析和下载，需要配置 Cookie (BDUSS)",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "homepage": "https://github.com/zhjich123/zjc",
   "repository": {
     "url": "https://github.com/zhjich123/zjc"

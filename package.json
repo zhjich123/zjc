@@ -1,6 +1,6 @@
 {
   "name": "gopeed-extension-baiduwp-share",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "description": "百度网盘分享链接解析扩展 for Gopeed",
   "main": "index.js",
