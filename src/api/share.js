@@ -13,9 +13,13 @@ class ShareClient {
       Cookie: bdcookie,
       Referer: 'https://pan.baidu.com/disk/main',
     };
+    this._shareInfo = null;
+    this._bdstoken = null;
+    this._signData = null;
   }
 
   async getShareInfo() {
+    if (this._shareInfo) return this._shareInfo;
     const resp = await fetch(
       `${API_URL}/share/wxlist?channel=weixin&version=2.2.2&clienttype=25&web=1`,
       {
@@ -28,43 +32,46 @@ class ShareClient {
     if (result.errno != 0) {
       throw new Error('获取分享信息失败，errno=' + result.errno);
     }
-    return result.data;
+    this._shareInfo = result.data;
+    return this._shareInfo;
   }
 
   async getFileList() {
     return await deepFileList(this._doGetList.bind(this), '');
   }
 
-  async getDlink(fid) {
-    gopeed.logger.info('获取下载链接，fid=', fid);
-    const { uk, shareid, seckey } = await this.getShareInfo();
-
+  async getBdstoken() {
+    if (this._bdstoken) return this._bdstoken;
     const bdstokenResp = await fetch(
       `${API_URL}/api/gettemplatevariable?fields=["bdstoken"]`,
-      {
-        headers: this.headers,
-      }
+      { headers: this.headers }
     );
     const bdstokenResult = await bdstokenResp.json();
     if (bdstokenResult.errno != 0) {
       throw new Error('获取bdstoken失败，errno=' + bdstokenResult.errno);
     }
-    const bdstoken = bdstokenResult.result.bdstoken;
-    gopeed.logger.debug('bdstoken:', bdstoken);
+    this._bdstoken = bdstokenResult.result.bdstoken;
+    return this._bdstoken;
+  }
 
+  async getSignData() {
+    if (this._signData) return this._signData;
+    const bdstoken = await this.getBdstoken();
     const signResp = await fetch(
       `${API_URL}/share/tplconfig?surl=${this.surl}&fields=sign,timestamp&channel=chunlei&web=1&app_id=250528&bdstoken=${bdstoken}&clienttype=0`,
-      {
-        headers: this.headers,
-      }
+      { headers: this.headers }
     );
     const signResult = await signResp.json();
     if (signResult.errno != 0) {
       throw new Error('获取签名失败，errno=' + signResult.errno);
     }
-    const { sign, timestamp } = signResult.data;
-    gopeed.logger.debug('sign:', sign);
-    gopeed.logger.debug('timestamp:', timestamp);
+    this._signData = signResult.data;
+    return this._signData;
+  }
+
+  async getDlink(fid) {
+    const { uk, shareid, seckey } = await this.getShareInfo();
+    const { sign, timestamp } = await this.getSignData();
 
     const durlResp = await fetch(
       `${API_URL}/api/sharedownload?channel=chunlei&clienttype=5&web=1&app_id=250528&sign=${sign}&timestamp=${timestamp}`,
@@ -79,8 +86,41 @@ class ShareClient {
       throw new Error('获取dlink失败，errno=' + durlResult.errno);
     }
     const dlink = durlResult.list[0].dlink;
-    gopeed.logger.debug('dlink:', dlink);
+    return await this._resolveRealDlink(dlink);
+  }
 
+  async getBatchDlinks(fids) {
+    const { uk, shareid, seckey } = await this.getShareInfo();
+    const { sign, timestamp } = await this.getSignData();
+
+    const fidList = '[' + fids.join(',') + ']';
+    const durlResp = await fetch(
+      `${API_URL}/api/sharedownload?channel=chunlei&clienttype=5&web=1&app_id=250528&sign=${sign}&timestamp=${timestamp}`,
+      {
+        method: 'POST',
+        headers: this.headers,
+        body: `encrypt=0&extra={"sekey":"${seckey}"}&product=share&timestamp=${timestamp}&uk=${uk}&primaryid=${shareid}&fid_list=${fidList}&type=nolimit`,
+      }
+    );
+    const durlResult = await durlResp.json();
+    if (durlResult.errno != 0) {
+      throw new Error('批量获取dlink失败，errno=' + durlResult.errno);
+    }
+
+    const dlinkMap = {};
+    for (const item of durlResult.list) {
+      if (item.dlink) {
+        dlinkMap[item.fs_id] = item.dlink;
+      }
+    }
+    return dlinkMap;
+  }
+
+  async resolveRealDlinkForFid(fid, dlink) {
+    return await this._resolveRealDlink(dlink);
+  }
+
+  async _resolveRealDlink(dlink) {
     const dlinkParts = dlink.split('?')[1];
     const realDurlResp = await fetch(
       `https://d.pcs.baidu.com/rest/2.0/pcs/file?app_id=250528&method=locatedownload&check_blue=1&es=1&esl=1&ant=1&${dlinkParts}&ver=4.0&dtype=1&err_ver=1.0&ehps=1&eck=1&vip=2&open_pflag=0&wp_retry_num=2&dpkg=1&sd=0&clienttype=9&version=3.0.20.18&channel=0&version_app=7.44.7.1`,
@@ -106,7 +146,6 @@ class ShareClient {
     if (realDlink === '') {
       realDlink = realDurlResult.urls[0].url;
     }
-    gopeed.logger.debug('realDlink:', realDlink);
     return realDlink;
   }
 
@@ -138,16 +177,6 @@ class ShareClient {
       throw new Error('解析文件列表失败，errno=' + result.errno);
     }
     return result.data;
-  }
-
-  async getFileListWithInfo() {
-    const files = await deepFileList(this._doGetList.bind(this), '');
-    for (const file of files) {
-      if (!file.filename && file.server_filename) {
-        file.filename = file.server_filename;
-      }
-    }
-    return files;
   }
 }
 

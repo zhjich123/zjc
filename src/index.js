@@ -14,8 +14,8 @@ gopeed.events.onResolve(async (ctx) => {
 
   const u = new URL(url);
   const surl = u.pathname.split('/')[2];
-  const search = u.searchParams;
   let pwd = '';
+  const search = u.searchParams;
   if (search && search.get('pwd')) {
     pwd = search.get('pwd');
   }
@@ -26,6 +26,7 @@ gopeed.events.onResolve(async (ctx) => {
 
   try {
     const shareClient = new ShareClient(surl, pwd, gopeed.settings.bdcookie);
+
     const shareInfo = await shareClient.getShareInfo();
     const name =
       shareInfo.title.split('/').pop() +
@@ -34,25 +35,47 @@ gopeed.events.onResolve(async (ctx) => {
       shareInfo.title.split('/').slice(0, -1).join('/') + '/';
 
     const fileList = await shareClient.getFileList();
-    gopeed.logger.debug('fileList', JSON.stringify(fileList));
+    gopeed.logger.info('解析到文件数量:', fileList.length);
 
-    ctx.res = {
-      name,
-      files: fileList.map((item) => ({
-        name: item.filename || item.server_filename || '未知文件名',
+    const fids = fileList.map((f) => f.fs_id);
+    const dlinkMap = await shareClient.getBatchDlinks(fids);
+    gopeed.logger.info('批量获取到 dlink 数量:', Object.keys(dlinkMap).length);
+
+    const files = [];
+    for (const item of fileList) {
+      const fid = item.fs_id;
+      const fileName = item.server_filename || '未知文件名';
+      let downloadUrl = '';
+
+      if (dlinkMap[fid]) {
+        try {
+          downloadUrl = await shareClient.resolveRealDlinkForFid(
+            fid,
+            dlinkMap[fid]
+          );
+          gopeed.logger.info('获取到真实下载链接:', fileName, downloadUrl);
+        } catch (e) {
+          gopeed.logger.error('获取真实下载链接失败，将使用 dlink:', fileName, e.message);
+          downloadUrl = dlinkMap[fid];
+        }
+      }
+
+      if (!downloadUrl) {
+        gopeed.logger.error('无法获取下载链接，跳过文件:', fileName);
+        continue;
+      }
+
+      files.push({
+        name: fileName,
         size: item.size || 0,
         path: item.path
-          ? item.path
-              .replace(parentDir, '')
-              .split('/')
-              .slice(0, -1)
-              .join('/')
+          ? item.path.replace(parentDir, '').split('/').slice(0, -1).join('/')
           : '',
         req: {
-          url: item.dlink || `http://placeholder.baidu.com/file/${item.fs_id}`,
+          url: downloadUrl,
           extra: {
             header: {
-              'User-Agent': 'pan.baidu.com',
+              'User-Agent': 'netdisk;11.4.51.4.19',
               Cookie: gopeed.settings.bdcookie,
             },
           },
@@ -61,11 +84,13 @@ gopeed.events.onResolve(async (ctx) => {
             rawUrl: ctx.req.url,
             surl: surl,
             pwd: pwd,
-            fid: item.fs_id,
+            fid: fid,
           },
         },
-      })),
-    };
+      });
+    }
+
+    ctx.res = { name, files };
   } catch (error) {
     gopeed.logger.error('解析分享链接失败:', error.message || error);
     throw error;
@@ -73,33 +98,20 @@ gopeed.events.onResolve(async (ctx) => {
 });
 
 gopeed.events.onStart(async (ctx) => {
-  await updateDlink(ctx.task);
-});
-
-gopeed.events.onError(async (ctx) => {
-  gopeed.logger.info('下载出错，尝试重新获取下载链接...');
-  try {
-    await updateDlink(ctx.task);
-    ctx.task.continue();
-  } catch (error) {
-    gopeed.logger.error('重新获取下载链接失败:', error.message || error);
+  const req = ctx.task.meta.req;
+  if (req.labels.gotDlink) {
+    return;
   }
-});
 
-async function updateDlink(task) {
-  const req = task.meta.req;
-  if (!req.labels.gotDlink || task.status == 'error') {
-    const fid = req.labels.fid;
-    const surl = req.labels.surl;
-    const pwd = req.labels.pwd;
+  const fid = req.labels.fid;
+  const surl = req.labels.surl;
+  const pwd = req.labels.pwd;
+  if (!surl || !fid) return;
 
-    if (!surl || !fid) {
-      return;
-    }
-
+  try {
     const shareClient = new ShareClient(surl, pwd, gopeed.settings.bdcookie);
     const dlink = await shareClient.getDlink(fid);
-    gopeed.logger.info('获取到真实下载链接:', dlink);
+    gopeed.logger.info('onStart 获取到真实下载链接:', dlink);
 
     req.url = dlink;
     req.extra = {
@@ -109,5 +121,36 @@ async function updateDlink(task) {
       },
     };
     req.labels.gotDlink = '1';
+  } catch (error) {
+    gopeed.logger.error('onStart 获取下载链接失败:', error.message || error);
+    throw error;
   }
-}
+});
+
+gopeed.events.onError(async (ctx) => {
+  gopeed.logger.info('下载出错，尝试重新获取下载链接...');
+  try {
+    const req = ctx.task.meta.req;
+    const fid = req.labels.fid;
+    const surl = req.labels.surl;
+    const pwd = req.labels.pwd;
+
+    if (!surl || !fid) return;
+
+    const shareClient = new ShareClient(surl, pwd, gopeed.settings.bdcookie);
+    const dlink = await shareClient.getDlink(fid);
+    gopeed.logger.info('onError 获取到新下载链接:', dlink);
+
+    req.url = dlink;
+    req.extra = {
+      header: {
+        'User-Agent': 'netdisk;11.4.51.4.19',
+        Cookie: gopeed.settings.bdcookie,
+      },
+    };
+    req.labels.gotDlink = '1';
+    ctx.task.continue();
+  } catch (error) {
+    gopeed.logger.error('重新获取下载链接失败:', error.message || error);
+  }
+});
